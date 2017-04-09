@@ -32,9 +32,11 @@ static Time GetTime()
 	return instance;
 }
 */
+
 class Time
 {
 private:
+	friend class Timer;
 	//For use in program
 	float _deltaTime;
 	double _doubleDeltaTime;
@@ -48,7 +50,7 @@ private:
 
 	//For use behind scenes
 	long long _prevTicksCount[TIME_NUMSAMPLES];
-	long long _thisTickCount;
+	long long _firstTickCount;
 	long long _frequency;
 	unsigned char _signalCount;
 	unsigned char _elapsedSignals;
@@ -59,7 +61,7 @@ public:
 		ZeroMemory(_prevTicksCount, sizeof(_prevTicksCount));
 		_signalCount = _elapsedSignals = 0;
 		_doubleDeltaTime = _doubleSmoothDeltaTime = 0.0;
-		_thisTickCount = _frequency = 0;
+		_firstTickCount = _frequency = 0;
 		_deltaTime = _smoothDeltaTime = _elapsedTime = 0.0f;
 		_fixedDeltaTime = 0.016667f;
 		_timeScale = _fixedTimeScale = 1.0f;
@@ -70,7 +72,7 @@ public:
 		ZeroMemory(_prevTicksCount, sizeof(_prevTicksCount));
 		_signalCount = _elapsedSignals = 0;
 		_doubleDeltaTime = _doubleSmoothDeltaTime = 0.0;
-		_thisTickCount = _frequency = 0;
+		_firstTickCount = _frequency = 0;
 		_deltaTime = _smoothDeltaTime = _elapsedTime = 0.0f;
 		_fixedDeltaTime = 0.0f;
 		_timeScale = _fixedTimeScale = 0.0f;
@@ -115,7 +117,7 @@ public:
 		QueryPerformanceCounter((LARGE_INTEGER*)_prevTicksCount);
 		_signalCount = TIME_MIN(_signalCount + 1, TIME_NUMSAMPLES - 1);
 
-		_elapsedTime = float(_prevTicksCount[0] - _thisTickCount) / float(_frequency);
+		_elapsedTime = float(_prevTicksCount[0] - _firstTickCount) / float(_frequency);
 		_doubleDeltaTime = double(_prevTicksCount[0] - _prevTicksCount[1]) / double(_frequency);
 		_fixedTimeCounter += (float)_doubleDeltaTime * _fixedTimeScale;
 		_doubleDeltaTime *= _timeScale;
@@ -149,8 +151,94 @@ public:
 		_deltaTime = _smoothDeltaTime = _elapsedTime = 0.0f;
 		_timeScale = _fixedTimeScale = 1.0f;
 
+		QueryPerformanceCounter((LARGE_INTEGER*)&_firstTickCount);
+		_prevTicksCount[_signalCount++] = _firstTickCount;
+	};
+};
+
+class Timer
+{
+private:
+	Time* _friendTime;
+
+	float _deltaTime;
+	float _elapsedTime;
+
+	float _executeInterval;
+
+	//For use behind scenes
+	long long _prevTickCount;
+	long long _thisTickCount;
+	long long _frequency;
+public:
+	//This Constructor is basicly a smaller version on the Time class
+	Timer(float executionInterval)
+	{
+		_frequency = 0;
+		_deltaTime = _elapsedTime = 0.0f;
+		_executeInterval = executionInterval;
+		_friendTime = nullptr;
+		QueryPerformanceFrequency((LARGE_INTEGER*)&_frequency);
+	}
+	//Makes the Time class a parent so that we can get the delta information from it fast and easy
+	Timer(float executionInterval, Time* parentTime)
+	{
+		_frequency = 0;
+		_deltaTime = _elapsedTime = 0.0f;
+		_executeInterval = executionInterval;
+		_friendTime = parentTime;
+		_elapsedTime = _friendTime->_elapsedTime;
+		_deltaTime = _friendTime->_deltaTime;
+	}
+	~Timer()
+	{
+		_friendTime = nullptr;
+		_frequency = 0;
+		_deltaTime = _elapsedTime = 0.0f;
+		_prevTickCount = 0;
+		_thisTickCount = 0;
+	}
+	//IF YOU USED THE OVERLOADED CONSTRUCTOR WITH TIME THEN THIS IS ALL YOU NEED TO CALL
+	//Used to check if the specified executeInterval has elapsed
+	bool canExecute()
+	{
+		if (_friendTime)
+		{
+			if (_friendTime->_elapsedTime - _elapsedTime >= _executeInterval)
+			{
+				_elapsedTime = _friendTime->_elapsedTime;
+				return true;
+			}
+		}
+		else if(_elapsedTime >= _executeInterval)
+		{
+			_elapsedTime = 0;
+			return true;
+		}
+		return false;
+	}
+	//IF YOU USED THE OVERLOADED CONSTRUCTOR WITH TIME THEN DONT USE THIS
+	//Used at the beginning of each loop cycle
+	void Signal()
+	{
+		if (_friendTime) return;
 		QueryPerformanceCounter((LARGE_INTEGER*)&_thisTickCount);
-		_prevTicksCount[_signalCount++] = _thisTickCount;
+
+		_deltaTime = float(_prevTickCount - _thisTickCount) / float(_frequency);
+		_elapsedTime += _deltaTime;
+
+		_prevTickCount = _thisTickCount;
+	};
+	//IF YOU USED THE OVERLOADED CONSTRUCTOR WITH TIME THEN DONT USE THIS
+	//Used at the beginning of each loop cycle -- More efficient
+	void Signal(float deltaTime)
+	{
+		if (_friendTime) return;
+		_elapsedTime += deltaTime;
+		_deltaTime = deltaTime;
+
+		QueryPerformanceCounter((LARGE_INTEGER*)&_thisTickCount);
+		_prevTickCount = _thisTickCount;
 	};
 };
 #endif
