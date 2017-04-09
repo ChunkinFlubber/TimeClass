@@ -43,6 +43,7 @@ private:
 	float _smoothDeltaTime;
 	double _doubleSmoothDeltaTime;
 	float _elapsedTime;
+	float _elapsedTimeWithScale;
 	float _fixedDeltaTime;
 	float _timeScale;
 	float _fixedTimeScale;
@@ -62,7 +63,7 @@ public:
 		_signalCount = _elapsedSignals = 0;
 		_doubleDeltaTime = _doubleSmoothDeltaTime = 0.0;
 		_firstTickCount = _frequency = 0;
-		_deltaTime = _smoothDeltaTime = _elapsedTime = 0.0f;
+		_deltaTime = _smoothDeltaTime = _elapsedTime = _elapsedTimeWithScale = 0.0f;
 		_fixedDeltaTime = 0.016667f;
 		_timeScale = _fixedTimeScale = 1.0f;
 		Restart();
@@ -73,7 +74,7 @@ public:
 		_signalCount = _elapsedSignals = 0;
 		_doubleDeltaTime = _doubleSmoothDeltaTime = 0.0;
 		_firstTickCount = _frequency = 0;
-		_deltaTime = _smoothDeltaTime = _elapsedTime = 0.0f;
+		_deltaTime = _smoothDeltaTime = _elapsedTime = _elapsedTimeWithScale = 0.0f;
 		_fixedDeltaTime = 0.0f;
 		_timeScale = _fixedTimeScale = 0.0f;
 	};
@@ -87,6 +88,8 @@ public:
 	double doubleSmoothDeltaTime() { return _doubleSmoothDeltaTime; }
 	//Complete elapsed time since last call to Restart()
 	float elapsedTime() { return _elapsedTime; }
+	//Complete elapsed time since last call to Restart() IS AFFECTED BY TIMESCALE
+	float elapsedTimeWithScale() { return _elapsedTimeWithScale; }
 	//Returns the time interval for fixed updates such as physics
 	float fixedDeltaTime() { return _fixedDeltaTime; }
 	//Returns the time multiplier for delta time
@@ -122,6 +125,7 @@ public:
 		_fixedTimeCounter += (float)_doubleDeltaTime * _fixedTimeScale;
 		_doubleDeltaTime *= _timeScale;
 		_deltaTime = float(_doubleDeltaTime);
+		_elapsedTimeWithScale += _deltaTime;
 
 		double totalWeight = 0, runningWeight = 1;
 		LONGLONG totalValue = 0, sampleDelta;
@@ -148,7 +152,7 @@ public:
 
 		_signalCount = _elapsedSignals = 0;
 		_doubleDeltaTime = _doubleSmoothDeltaTime = _fixedTimeCounter = 0.0;
-		_deltaTime = _smoothDeltaTime = _elapsedTime = 0.0f;
+		_deltaTime = _smoothDeltaTime = _elapsedTime = _elapsedTimeWithScale = 0.0f;
 		_timeScale = _fixedTimeScale = 1.0f;
 
 		QueryPerformanceCounter((LARGE_INTEGER*)&_firstTickCount);
@@ -159,12 +163,13 @@ public:
 class Timer
 {
 private:
-	Time* _friendTime;
+	const Time* _friendTime;
 
 	float _deltaTime;
 	float _elapsedTime;
 
 	float _executeInterval;
+	bool _includeScale;
 
 	//For use behind scenes
 	long long _prevTickCount;
@@ -172,8 +177,10 @@ private:
 	long long _frequency;
 public:
 	//This Constructor is basicly a smaller version on the Time class
+	//float executionInterval is the time interval in which you want something to happen... or not
 	Timer(float executionInterval)
 	{
+		_includeScale = false;
 		_frequency = 0;
 		_deltaTime = _elapsedTime = 0.0f;
 		_executeInterval = executionInterval;
@@ -181,13 +188,20 @@ public:
 		QueryPerformanceFrequency((LARGE_INTEGER*)&_frequency);
 	}
 	//Makes the Time class a parent so that we can get the delta information from it fast and easy
-	Timer(float executionInterval, Time* parentTime)
+	//float executionInterval is the time interval in which you want something to happen... or not
+	//Time* parentTime is used to get the deltaTime/elapsedTime
+	//bool  includeScale if you want the timer to be affected by the timeScale or not default is false
+	Timer(float executionInterval, const Time* parentTime, bool includeScale = false)
 	{
+		_includeScale = includeScale;
 		_frequency = 0;
 		_deltaTime = _elapsedTime = 0.0f;
 		_executeInterval = executionInterval;
 		_friendTime = parentTime;
-		_elapsedTime = _friendTime->_elapsedTime;
+		if(includeScale)
+			_elapsedTime = _friendTime->_elapsedTimeWithScale;
+		else
+			_elapsedTime = _friendTime->_elapsedTime;
 		_deltaTime = _friendTime->_deltaTime;
 	}
 	~Timer()
@@ -204,10 +218,21 @@ public:
 	{
 		if (_friendTime)
 		{
-			if (_friendTime->_elapsedTime - _elapsedTime >= _executeInterval)
+			if (_includeScale)
 			{
-				_elapsedTime = _friendTime->_elapsedTime;
-				return true;
+				if (_friendTime->_elapsedTimeWithScale - _elapsedTime >= _executeInterval)
+				{
+					_elapsedTime = _friendTime->_elapsedTimeWithScale;
+					return true;
+				}
+			}
+			else
+			{
+				if (_friendTime->_elapsedTime - _elapsedTime >= _executeInterval)
+				{
+					_elapsedTime = _friendTime->_elapsedTime;
+					return true;
+				}
 			}
 		}
 		else if(_elapsedTime >= _executeInterval)
