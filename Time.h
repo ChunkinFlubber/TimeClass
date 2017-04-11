@@ -49,6 +49,8 @@ private:
 	float _fixedTimeScale;
 	float _fixedTimeCounter;
 
+	float _maxDeltaTime;
+
 	//For use behind scenes
 	long long _prevTicksCount[TIME_NUMSAMPLES];
 	long long _firstTickCount;
@@ -57,13 +59,14 @@ private:
 	unsigned char _elapsedSignals;
 
 public:
-	Time() 
+	Time()
 	{
 		ZeroMemory(_prevTicksCount, sizeof(_prevTicksCount));
 		_signalCount = _elapsedSignals = 0;
 		_doubleDeltaTime = _doubleSmoothDeltaTime = 0.0;
 		_firstTickCount = _frequency = 0;
 		_deltaTime = _smoothDeltaTime = _elapsedTime = _elapsedTimeWithScale = 0.0f;
+		_maxDeltaTime = 100.0f;
 		_fixedDeltaTime = 0.016667f;
 		_timeScale = _fixedTimeScale = 1.0f;
 		Restart();
@@ -112,6 +115,11 @@ public:
 		}
 		return false;
 	}
+	//Used to clamp the deltaTime to a max value -- Very helpful for debugging
+	void setMaxDeltaTime(float max)
+	{
+		_maxDeltaTime = max;
+	}
 	//Used at the beginning of each loop cycle
 	void Signal()
 	{
@@ -120,10 +128,11 @@ public:
 		QueryPerformanceCounter((LARGE_INTEGER*)_prevTicksCount);
 		_signalCount = TIME_MIN(_signalCount + 1, TIME_NUMSAMPLES - 1);
 
-		_elapsedTime = float(_prevTicksCount[0] - _firstTickCount) / float(_frequency);
 		_doubleDeltaTime = double(_prevTicksCount[0] - _prevTicksCount[1]) / double(_frequency);
+		_elapsedTime += (float)_doubleDeltaTime;
 		_fixedTimeCounter += (float)_doubleDeltaTime * _fixedTimeScale;
 		_doubleDeltaTime *= _timeScale;
+		if (_doubleDeltaTime > _maxDeltaTime) _doubleDeltaTime = (double)_maxDeltaTime;
 		_deltaTime = float(_doubleDeltaTime);
 		_elapsedTimeWithScale += _deltaTime;
 
@@ -165,7 +174,6 @@ class Timer
 private:
 	const Time* _friendTime;
 
-	float _deltaTime;
 	float _elapsedTime;
 
 	float _executeInterval;
@@ -182,12 +190,13 @@ public:
 	{
 		_includeScale = false;
 		_frequency = 0;
-		_deltaTime = _elapsedTime = 0.0f;
+		_elapsedTime = 0.0f;
 		_executeInterval = executionInterval;
 		_friendTime = nullptr;
 		QueryPerformanceFrequency((LARGE_INTEGER*)&_frequency);
 	}
 	//Makes the Time class a parent so that we can get the delta information from it fast and easy
+	//This is an easy way to do the timer if you have access to the Time that is assotiated with it
 	//float executionInterval is the time interval in which you want something to happen... or not
 	//Time* parentTime is used to get the deltaTime/elapsedTime
 	//bool  includeScale if you want the timer to be affected by the timeScale or not default is false
@@ -195,25 +204,24 @@ public:
 	{
 		_includeScale = includeScale;
 		_frequency = 0;
-		_deltaTime = _elapsedTime = 0.0f;
+		_elapsedTime = 0.0f;
 		_executeInterval = executionInterval;
 		_friendTime = parentTime;
-		if(includeScale)
+		if (includeScale)
 			_elapsedTime = _friendTime->_elapsedTimeWithScale;
 		else
 			_elapsedTime = _friendTime->_elapsedTime;
-		_deltaTime = _friendTime->_deltaTime;
 	}
 	~Timer()
 	{
 		_friendTime = nullptr;
 		_frequency = 0;
-		_deltaTime = _elapsedTime = 0.0f;
+		_elapsedTime = 0.0f;
 		_prevTickCount = 0;
 		_thisTickCount = 0;
 	}
-	//IF YOU USED THE OVERLOADED CONSTRUCTOR WITH TIME THEN THIS IS ALL YOU NEED TO CALL
 	//Used to check if the specified executeInterval has elapsed
+	//Can be called regardless of the constructor used
 	bool canExecute()
 	{
 		if (_friendTime)
@@ -235,36 +243,40 @@ public:
 				}
 			}
 		}
-		else if(_elapsedTime >= _executeInterval)
+		else
+		{
+			QueryPerformanceCounter((LARGE_INTEGER*)&_thisTickCount);
+
+			_elapsedTime += float(_thisTickCount - _prevTickCount ) / float(_frequency);
+
+			_prevTickCount = _thisTickCount;
+
+			if (_elapsedTime >= _executeInterval)
+			{
+				_elapsedTime = 0;
+				return true;
+			}
+		}
+		return false;
+	}
+	//Allows you to skip all quering of time and just directly pass in the deltaTime -- can be used regardless of constructor
+	//Returns true if the alloted time has passed
+	bool canExecute(float deltaTime)
+	{
+		_elapsedTime += deltaTime;
+
+		if (_elapsedTime >= _executeInterval)
 		{
 			_elapsedTime = 0;
 			return true;
 		}
 		return false;
 	}
-	//IF YOU USED THE OVERLOADED CONSTRUCTOR WITH TIME THEN DONT USE THIS
-	//Used at the beginning of each loop cycle
-	void Signal()
+	//If the Time constructor was used then this will change wether or not timeSacle is used
+	void IncludeScale(bool useScale)
 	{
-		if (_friendTime) return;
-		QueryPerformanceCounter((LARGE_INTEGER*)&_thisTickCount);
-
-		_deltaTime = float(_prevTickCount - _thisTickCount) / float(_frequency);
-		_elapsedTime += _deltaTime;
-
-		_prevTickCount = _thisTickCount;
-	};
-	//IF YOU USED THE OVERLOADED CONSTRUCTOR WITH TIME THEN DONT USE THIS
-	//Used at the beginning of each loop cycle -- More efficient
-	void Signal(float deltaTime)
-	{
-		if (_friendTime) return;
-		_elapsedTime += deltaTime;
-		_deltaTime = deltaTime;
-
-		QueryPerformanceCounter((LARGE_INTEGER*)&_thisTickCount);
-		_prevTickCount = _thisTickCount;
-	};
+		_includeScale = useScale;
+	}
 };
 #endif
 
